@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin: Trasa Cesty Domů</title>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
+    <style>
+        /* Základní styly a responzivita */
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f0f2f5; color: #333; margin: 0; padding: 20px; }
+        .container { max-width: 800px; margin: 0 auto; background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1); }
+        h1, h2 { color: #1e3a8a; border-bottom: 2px solid #e5e7eb; padding-bottom: 10px; margin-top: 25px; }
+        hr { border: 0; height: 1px; background-color: #e5e7eb; margin: 20px 0; }
+
+        /* Styly pro body cesty */
+        .cesta-bod { display: flex; flex-wrap: wrap; align-items: center; padding: 12px 0; border-bottom: 1px dashed #e5e7eb; }
+        .cesta-bod:last-child { border-bottom: none; }
+        .cesta-bod input[type="checkbox"] { width: 20px; height: 20px; margin-right: 15px; cursor: pointer; accent-color: #3b82f6; }
+        .cesta-bod label { flex-grow: 1; font-size: 1.1em; }
+        .predpokladany-cas { font-size: 0.9em; color: #6b7280; font-style: italic; min-width: 150px; text-align: right; }
+        /* Nový styl pro čas dokončení */
+        .dokonceno-cas { width: 100%; font-size: 0.9em; color: #10b981; font-weight: bold; margin-top: 5px; padding-left: 35px; } 
+
+        /* Odsazení pro autobus */
+        .odsazeny { padding-left: 15px; border-left: 3px solid #60a5fa; margin-left: 20px; margin-top: 10px; margin-bottom: 10px;}
+        .odsazeny h3 { margin: 5px 0 10px -15px; color: #3b82f6; font-size: 1em; border-bottom: 1px dotted #93c5fd; padding-bottom: 5px; padding-left: 15px; }
+        .odsazeny .cesta-bod { padding-left: 0; }
+        
+        /* Styly pro modální okna */
+        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.4); }
+        .modal-obsah { background-color: #fff; margin: 15% auto; padding: 20px; border: 1px solid #888; width: 80%; max-width: 500px; border-radius: 10px; text-align: center; }
+        .close-button { color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer; }
+        .read-confirmation { padding: 15px; border: 2px solid #4CAF50; background-color: #e8f5e9; border-radius: 8px;}
+        
+        /* Tlačítka a formuláře */
+        .casovac-sekce, .zpravy-sekce { padding: 20px; border-radius: 8px; margin-top: 20px; }
+        .casovac-sekce { background-color: #e0f2f1; }
+        .zpravy-sekce { background-color: #fef3c7; }
+        #odpocet-displej { font-size: 2.5em; font-weight: bold; color: #00796b; margin: 10px 0; }
+        #casovac-varovani { color: #e53935; font-size: 1.2em; font-weight: bold; margin-top: 10px; display: none; }
+        .tlacitko-cas, .tlacitko-reset, .tlacitko-odeslat, .tlacitko-modal { background-color: #3b82f6; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; margin: 5px; transition: background-color 0.3s; }
+        .tlacitko-reset { background-color: #ef4444; }
+        .tlacitko-odeslat { background-color: #f59e0b; }
+        textarea { width: 100%; padding: 10px; margin-top: 10px; border: 1px solid #d1d5db; border-radius: 5px; box-sizing: border-box; resize: vertical; }
+        #uspech-zprava { color: green; font-weight: bold; margin-top: 10px; display: none; clear: both; }
+
+        @media (max-width: 600px) {
+            .container { padding: 15px; }
+            .cesta-bod { flex-direction: column; align-items: flex-start; }
+            .predpokladany-cas { text-align: left; margin-top: 5px; }
+            .dokonceno-cas { padding-left: 0; }
+            #odpocet-displej { font-size: 2em; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Admin Panel: Zadání údajů cesty domů</h1>
+        <p>Zaškrtnutím položky se automaticky zaznamená přesný čas dokončení a dokončení se projeví i Alence.</p>
+        <hr>
+        <div id="cesta-admin-sekce"></div>
+        <hr>
+        <h2>Odpočet do příchodu domů</h2>
+        <div class="casovac-sekce">
+            <div id="odpocet-displej">--:--:--</div>
+            <div id="casovac-varovani"></div>
+            <button class="tlacitko-cas" onclick="openTimeModal()">Upravit cílový čas</button>
+        </div>
+        <hr>
+        <h2>Zaslat oznámení Alence</h2>
+        <div class="zpravy-sekce">
+            <textarea id="zprava-text" rows="3" placeholder="Napiš text zprávy pro odeslání..."></textarea>
+            <button class="tlacitko-odeslat" onclick="odeslatZpravu()">Odeslat zprávu</button>
+            <p id="uspech-zprava">Zpráva úspěšně odeslána a čeká na potvrzení přečtení.</p>
+        </div>
+        <hr>
+        <div class="reset-sekce" style="text-align: center;">
+            <button class="tlacitko-reset" onclick="openResetModal()">Resetovat databázi</button>
+        </div>
+    </div>
+
+    <!-- Modální okna -->
+    <div id="timeChoiceModal" class="modal">
+        <div class="modal-obsah">
+            <span class="close-button" onclick="closeModal('timeChoiceModal')">&times;</span>
+            <h2>Zadat čas příchodu</h2>
+            <button class="tlacitko-modal" onclick="showTimeInput('absolute')">Zadat čas hodina, min, s příchodu</button>
+            <button class="tlacitko-modal" onclick="showTimeInput('minutes')">Zadat kolik minut zbývá do příchodu</button>
+        </div>
+    </div>
+    
+    <div id="timeInputModal" class="modal">
+        <div class="modal-obsah">
+            <span class="close-button" onclick="closeModal('timeInputModal')">&times;</span>
+            <h2 id="time-input-title"></h2>
+            <div id="absolute-time-input" style="display: none;">
+                <p>Zadat čas, kdy dojdu domů. Hodiny:minuty:sekundy:</p>
+                <div id="cas-input-fields" style="display: flex; justify-content: center; gap: 5px;">
+                    <input type="number" id="input-h" min="0" max="23" placeholder="HH" value="15" style="width: 60px; text-align: center;">:
+                    <input type="number" id="input-m" min="0" max="59" placeholder="MM" value="51" style="width: 60px; text-align: center;">:
+                    <input type="number" id="input-s" min="0" max="59" placeholder="SS" value="00" style="width: 60px; text-align: center;">
+                </div>
+            </div>
+            <div id="minutes-time-input" style="display: none; margin-top: 15px;">
+                <p>Nyní je <span id="currentTime">--:--:--</span>. Nastavit odpočet - zadat ZA KOLIK MINUT přesně jsem doma:</p>
+                <input type="number" id="input-minuty" min="1" placeholder="Minuty" style="width: 100px; text-align: center; font-size: 1.2em;">
+                <p>...minut do příchodu domů.</p>
+            </div>
+            <p id="time-error" style="color: red;"></p>
+            <button class="tlacitko-modal tlacitko-potvrdit" onclick="potvrditNovyCas()">Potvrdit</button>
+        </div>
+    </div>
+    
+    <div id="readConfirmationModal" class="modal">
+        <div class="modal-obsah">
+            <span class="close-button" onclick="closeModal('readConfirmationModal')">&times;</span>
+            <div class="read-confirmation">
+                <h3>PŘEČTENO ✅</h3>
+                <p>Alenka ručně potvrdila přečtení zprávy:</p>
+                <p id="original-message-text" style="font-style: italic; font-weight: normal;"></p>
+            </div>
+            <button class="tlacitko-modal tlacitko-potvrdit" onclick="closeModal('readConfirmationModal')">Zavřít</button>
+        </div>
+    </div>
+    
+    <div id="resetModal" class="modal">
+        <div class="modal-obsah">
+            <span class="close-button" onclick="closeModal('resetModal')">&times;</span>
+            <h2>Opravdu smazat všechny zadané údaje z databáze?</h2>
+            <p>Tato akce resetuje všechny zaškrtnuté položky a časovač.</p>
+            <button class="tlacitko-modal tlacitko-reset" onclick="resetDatabase()">Ano, RESETOVAT</button>
+            <button class="tlacitko-modal tlacitko-potvrdit" onclick="closeModal('resetModal')">Ne, ponechat</button>
+        </div>
+    </div>
+    
+    <script>
+        // VÁŠ KONFIGURAČNÍ OBJEKT
+        const firebaseConfig = {
+            apiKey: "AIzaSyBOfqpEjP9jCpz-EjvQXmQzFOvmP7xRBTo",
+            authDomain: "patek-7b87f.firebaseapp.com",
+            databaseURL: "https://patek-7b87f-default-rtdb.europe-west1.firebasedatabase.app",
+            projectId: "patek-7b87f",
+            storageBucket: "patek-7b87f.firebasestorage.app",
+            messagingSenderId: "571599486021",
+            appId: "1:571599486021:web:12899478e3bff4c913f72c"
+        };
+
+        firebase.initializeApp(firebaseConfig);
+        const database = firebase.database();
+        const refRoot = database.ref('cesta_studenta');
+        const refStav = database.ref('cesta_studenta/stav');
+        const refCas = database.ref('cesta_studenta/cas');
+        const refZpravy = database.ref('cesta_studenta/zpravy');
+
+        let currentTargetTimeMs = 0; 
+        let countdownInterval;
+        let lastReadStatus = false;
+        let currentMessage = null; 
+
+        // Mapování bodů cesty: [Popis, Předpokládaný čas, Je odsazený (v autobusu)]
+        const cestaBodyMap = {
+            ve_skole: ["Ve škole", "7:00 - 14:00", false],
+            odchod_ze_skoly: ["Odchod ze školy", "14:05", false],
+            jdu_na_obed: ["Jdu na oběd", "14:10", false],
+            mam_pridel_obed: ["Mám přidělený oběd", "14:20", false],
+            snezeno_odchazim_z_jidelny: ["Snězeno, odcházím z jídelny", "14:35", false],
+            jdu_pres_park: ["Jdu přes park", "14:35 - 14:55", false],
+            jsem_na_trznici: ["Jsem na tržnici", "14:55", false],
+            cekani_na_autobus: ["Čekám na příjezd autobusu", "14:55 - 15:15", false],
+            autobus_dorazil: ["Autobus dorazil", "15:15", false],
+            autobus_vyrazil_na_cestu: ["Autobus vyrazil na cestu", "15:15", false],
+            zastavka_trznice: ["Zastávka: Tržnice, Plocha 3", "15:15", true],
+            zastavka_trnkova: ["Zastávka: Olomouc, Trnkova", "15:18", true],
+            zastavka_andelska: ["Zastávka: Olomouc, Andělská", "15:20", true],
+            zastavka_ahold: ["Zastávka: Olomouc, Ahold", "15:22", true],
+            zastavka_kozusany: ["Zastávka: Kožušany-Tážaly", "15:25", true],
+            zastavka_blatec: ["Zastávka: Blatec", "15:27", true],
+            zastavka_charvaty: ["Zastávka: Charváty", "15:29", true],
+            zastavka_drahlov: ["Zastávka: Drahlov", "15:31", true],
+            vyrazim_na_cestu_domu: ["Vyrážím na cestu domů", "15:32", false],
+            jsem_na_ceste_domu: ["Jsem na cestě domů", "15:32 - 15:50", false],
+            jsem_doma: ["Jsem doma", "15:51", false],
+            muzeme_delat_veci: ["Můžeme dělat věci...", "po 16:00", false],
+        };
+
+        // --- Pomocné funkce ---
+
+        function formatTime(timestamp) {
+            if (!timestamp || timestamp === 0) return '';
+            const date = new Date(timestamp);
+            return date.toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        }
+
+        function buildCestaUI() {
+            const container = document.getElementById('cesta-admin-sekce');
+            let html = '';
+            let inBusSection = false;
+
+            for (const key in cestaBodyMap) {
+                const [label, cas, odsazeny] = cestaBodyMap[key];
+
+                if (key === 'zastavka_trznice' && !inBusSection) {
+                    html += `<div class="odsazeny"><h3>Trasování autobusu</h3>`;
+                    inBusSection = true;
+                } else if (key === 'vyrazim_na_cestu_domu' && inBusSection) {
+                    html += `</div>`;
+                    inBusSection = false;
+                }
+                
+                // Přidání třídy pro odsazení (pokud je v autobusu)
+                const itemClass = odsazeny ? 'odsazeny-item' : '';
+
+                html += `
+                    <div class="cesta-bod ${itemClass}">
+                        <input type="checkbox" id="check-${key}" data-key="${key}" onchange="updateStav('${key}', this.checked)">
+                        <label for="check-${key}">${label}</label>
+                        <span class="predpokladany-cas">Předpokládaný čas: ${cas}</span>
+                        <div class="dokonceno-cas" id="time-${key}"></div>
+                    </div>
+                `;
+            }
+            if (inBusSection) html += `</div>`;
+            container.innerHTML = html;
+        }
+
+        // --- Listener a Logika pro body cesty ---
+        
+        function listenToStav() {
+            refStav.on('value', snapshot => {
+                const stav = snapshot.val();
+                if (stav) {
+                    for (const key in stav) {
+                        const timestamp = stav[key] || 0;
+                        const checkbox = document.getElementById(`check-${key}`);
+                        const timeDisplay = document.getElementById(`time-${key}`);
+                        
+                        if (checkbox) {
+                            // Zaškrtnuto, pokud je uloženo číslo (timestamp > 0)
+                            checkbox.checked = timestamp > 0;
+                        }
+                        
+                        if (timeDisplay) {
+                            if (timestamp > 0) {
+                                timeDisplay.textContent = `Dokončeno v: ${formatTime(timestamp)}`;
+                            } else {
+                                timeDisplay.textContent = '';
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        /**
+         * Zpracuje změnu stavu checkboxu. Uloží timestamp nebo 0.
+         */
+        function updateStav(key, checked) {
+            const value = checked ? new Date().getTime() : 0; 
+            
+            refStav.child(key).set(value)
+                .then(() => console.log(`Stav ${key} aktualizován na ${value}`))
+                .catch(error => console.error("Chyba při aktualizaci stavu:", error));
+        }
+
+        // --- Logika pro odpočet ---
+
+        function listenToCas() {
+            refCas.on('value', snapshot => {
+                const casData = snapshot.val();
+                if (casData && casData.cilovy_cas_ms) {
+                    currentTargetTimeMs = casData.cilovy_cas_ms;
+                    // Spustit/aktualizovat odpočet
+                    startCountdown();
+                } else {
+                    document.getElementById('odpocet-displej').textContent = "Čas není nastaven.";
+                }
+            });
+        }
+
+        function startCountdown() {
+            if (countdownInterval) {
+                clearInterval(countdownInterval);
+            }
+            updateCountdown(); 
+            countdownInterval = setInterval(updateCountdown, 1000);
+        }
+
+        function updateCountdown() {
+            const now = new Date().getTime();
+            const distance = currentTargetTimeMs - now;
+            const display = document.getElementById('odpocet-displej');
+            const warning = document.getElementById('casovac-varovani');
+
+            if (distance < 0) {
+                display.textContent = "00:00:00";
+                warning.textContent = "Příchod domů už proběhl!";
+                warning.style.display = 'block';
+                clearInterval(countdownInterval);
+            } else {
+                // *** OPRAVENO: Přidán výpočet dnů a úprava zobrazení ***
+                const d = Math.floor(distance / (1000 * 60 * 60 * 24));
+                const h = Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                const m = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
+                const s = Math.floor((distance % (1000 * 60)) / 1000);
+                
+                const format = (n) => String(n).padStart(2, '0');
+                
+                if (d > 0) {
+                    // Zobrazit dny + hodiny:minuty:sekundy
+                    display.textContent = `${d} dnů ${format(h)}:${format(m)}:${format(s)}`;
+                } else {
+                    // Zobrazit jen hodiny:minuty:sekundy
+                    display.textContent = `${format(h)}:${format(m)}:${format(s)}`;
+                }
+                warning.style.display = 'none';
+            }
+        }
+        
+        // --- Logika pro zprávy ---
+
+        function odeslatZpravu() {
+            const text = document.getElementById('zprava-text').value.trim();
+            const uspechElement = document.getElementById('uspech-zprava');
+
+            if (text === "") {
+                uspechElement.textContent = "Zpráva nesmí být prázdná!";
+                uspechElement.style.color = 'red';
+                uspechElement.style.display = 'block';
+                return;
+            }
+
+            const newMessage = {
+                text: text,
+                timestamp: new Date().getTime(),
+                read: false, // Zpráva čeká na přečtení
+            };
+
+            // Uložíme zprávu pod novým ID
+            refZpravy.push(newMessage)
+                .then(() => {
+                    document.getElementById('zprava-text').value = '';
+                    uspechElement.textContent = "Zpráva úspěšně odeslána a čeká na potvrzení přečtení.";
+                    uspechElement.style.color = 'green';
+                    uspechElement.style.display = 'block';
+                    setTimeout(() => uspechElement.style.display = 'none', 5000);
+                })
+                .catch(error => console.error("Chyba při odesílání zprávy:", error));
+        }
+
+        function checkLastMessageReadStatus() {
+            refZpravy.limitToLast(1).on('child_added', snapshot => {
+                currentMessage = { ...snapshot.val(), id: snapshot.key };
+                lastReadStatus = currentMessage.read;
+                
+                if (currentMessage.read) {
+                    document.getElementById('original-message-text').textContent = currentMessage.text;
+                    openModal('readConfirmationModal');
+                }
+            });
+            refZpravy.limitToLast(1).on('child_changed', snapshot => {
+                const changedMessage = { ...snapshot.val(), id: snapshot.key };
+                // Pouze pokud byla zpráva právě změněna na 'read: true'
+                if (changedMessage.read && !lastReadStatus) {
+                    document.getElementById('original-message-text').textContent = changedMessage.text;
+                    openModal('readConfirmationModal');
+                }
+                lastReadStatus = changedMessage.read;
+            });
+        }
+
+        // --- Modální okna a reset ---
+        function openModal(id) { document.getElementById(id).style.display = 'flex'; }
+        function closeModal(id) { document.getElementById(id).style.display = 'none'; }
+        function openTimeModal() { 
+             const now = new Date();
+             document.getElementById('currentTime').textContent = now.toLocaleTimeString('cs-CZ');
+             openModal('timeChoiceModal'); 
+        }
+        function openResetModal() { openModal('resetModal'); }
+
+
+        function showTimeInput(type) {
+            closeModal('timeChoiceModal');
+            const inputModal = document.getElementById('timeInputModal');
+            document.getElementById('absolute-time-input').style.display = 'none';
+            document.getElementById('minutes-time-input').style.display = 'none';
+            document.getElementById('time-error').textContent = '';
+
+            if (type === 'absolute') {
+                document.getElementById('time-input-title').textContent = "Zadat absolutní čas příchodu";
+                document.getElementById('absolute-time-input').style.display = 'block';
+            } else if (type === 'minutes') {
+                document.getElementById('time-input-title').textContent = "Zadat minuty do příchodu";
+                document.getElementById('minutes-time-input').style.display = 'block';
+            }
+            openModal('timeInputModal');
+        }
+
+        function potvrditNovyCas() {
+            let newTimeMs;
+            const absoluteInput = document.getElementById('absolute-time-input').style.display === 'block';
+            const errorElement = document.getElementById('time-error');
+            errorElement.textContent = '';
+
+            if (absoluteInput) {
+                const h = parseInt(document.getElementById('input-h').value);
+                const m = parseInt(document.getElementById('input-m').value);
+                const s = parseInt(document.getElementById('input-s').value);
+
+                const newDate = new Date();
+                newDate.setHours(h, m, s, 0);
+
+                // Pokud je čas v minulosti, posuneme na zítřek (dynamické nastavení)
+                if (newDate.getTime() < new Date().getTime() - 60000) { // Tolerance 1 minuta
+                    newDate.setDate(newDate.getDate() + 1);
+                }
+                newTimeMs = newDate.getTime();
+            } else { // Minuty
+                const minutes = parseInt(document.getElementById('input-minuty').value);
+                if (isNaN(minutes) || minutes <= 0) {
+                    errorElement.textContent = "Zadejte platný počet minut (větší než 0).";
+                    return;
+                }
+                newTimeMs = new Date().getTime() + (minutes * 60 * 1000);
+            }
+
+            const casData = {
+                cilovy_cas_ms: newTimeMs,
+                // OPRAVENO: Používáme toLocaleString s plným datem a časem
+                cilovy_cas_text: new Date(newTimeMs).toLocaleString('cs-CZ', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+            };
+
+            refCas.set(casData)
+                .then(() => {
+                    closeModal('timeInputModal');
+                    console.log("Nový cílový čas byl úspěšně nastaven.");
+                })
+                .catch(error => {
+                    errorElement.textContent = `Chyba při ukládání času: ${error.message}`;
+                    console.error("Chyba při ukládání času:", error);
+                });
+        }
+        
+        function resetDatabase() {
+            closeModal('resetModal');
+            // Data pro reset stavu (vše na 0)
+            const resetStavData = {};
+            Object.keys(cestaBodyMap).forEach(key => {
+                resetStavData[key] = 0; 
+            });
+            
+            // OPRAVA CHYBY DATUMU: Nastaveno na pevné datum 3. 10. 2025 v 15:51:00
+            // Měsíc v JS je 0-indexovaný, 9 = říjen.
+            const vychoziDatum = new Date(2025, 9, 3, 15, 51, 0, 0); 
+            
+            const resetCasData = {
+                cilovy_cas_ms: vychoziDatum.getTime(),
+                cilovy_cas_text: vychoziDatum.toLocaleString('cs-CZ', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+            };
+            
+            // Provedení resetu
+            refStav.set(resetStavData)
+                .then(() => refCas.set(resetCasData))
+                .then(() => refZpravy.set(null)) // Smažeme zprávy
+                .then(() => { console.log("Databáze úspěšně resetována."); })
+                .catch(error => { console.error(`Chyba při resetu: ${error.message}`); });
+        }
+
+
+        document.addEventListener('DOMContentLoaded', () => {
+            buildCestaUI();
+            listenToStav(); // Naslouchání stavu cesty
+            listenToCas();  // Naslouchání cílovému času
+            checkLastMessageReadStatus(); // Kontrola přečtení zpráv
+        });
+    </script>
+</body>
+</html>
